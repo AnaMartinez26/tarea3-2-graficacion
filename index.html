@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
+  <title>Realidad Aumentada WebXR - ITS</title>
+
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      color: white;
+    }
+
+    #info {
+      padding: 14px;
+      text-align: center;
+      background: rgba(20, 40, 66, 0.85);
+    }
+
+    #estado {
+      position: absolute;
+      bottom: 85px;
+      left: 5%;
+      width: 90%;
+      padding: 12px 0;
+      text-align: center;
+      background: rgba(20, 40, 66, 0.8);
+      border-radius: 8px;
+    }
+
+    #colocar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 14px 22px;
+      border: none;
+      border-radius: 9px;
+      background: #1e88e5;
+      color: white;
+      font-size: 16px;
+      pointer-events: auto;
+      display: none;
+    }
+
+    .a-enter-vr {
+      z-index: 20 !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="overlay">
+    <div id="info">
+      <strong>Realidad Aumentada - ITS</strong>
+      <div>WebXR · Hit Test · Sin marcadores</div>
+    </div>
+
+    <div id="estado">
+      Pulsa el botón de RA de A-Frame para comenzar.
+    </div>
+
+    <button id="colocar">Colocar figura</button>
+  </div>
+
+  <a-scene
+    xr-mode-ui="XRMode: xr"
+    webxr="
+      requiredFeatures: hit-test, local-floor;
+      optionalFeatures: dom-overlay;
+      overlayElement: #overlay;
+    "
+    renderer="alpha: true; antialias: true"
+    background="transparent: true"
+    surface-hit-test
+  >
+    <a-camera position="0 1.6 0"></a-camera>
+
+    <a-light type="ambient" intensity="1"></a-light>
+    <a-light type="directional" intensity="1" position="2 4 3"></a-light>
+
+    <!-- Retícula que indica la superficie detectada -->
+    <a-ring
+      id="reticula"
+      rotation="-90 0 0"
+      radius-inner="0.08"
+      radius-outer="0.11"
+      material="shader: flat; color: #00ff88; side: double"
+      visible="false">
+    </a-ring>
+
+    <!-- Grupo tridimensional -->
+    <a-entity id="figura" visible="false">
+
+      <a-box
+        position="0 0.35 0"
+        scale="0.45 0.45 0.45"
+        material="color: #e63946; metalness: 0.3; roughness: 0.4"
+        animation__giro="
+          property: rotation;
+          to: 360 360 0;
+          loop: true;
+          dur: 6000;
+          easing: linear"
+        animation__flotar="
+          property: position;
+          from: 0 0.2 0;
+          to: 0 0.5 0;
+          dir: alternate;
+          loop: true;
+          dur: 1500;
+          easing: easeInOutSine"
+        animation__color="
+          property: material.color;
+          type: color;
+          from: #e63946;
+          to: #457b9d;
+          dir: alternate;
+          loop: true;
+          dur: 3000">
+      </a-box>
+
+      <a-entity
+        animation="
+          property: rotation;
+          to: 0 360 0;
+          loop: true;
+          dur: 4000;
+          easing: linear">
+
+        <a-sphere
+          position="0.65 0.35 0"
+          radius="0.12"
+          material="color: #ffd166">
+        </a-sphere>
+
+      </a-entity>
+    </a-entity>
+  </a-scene>
+
+  <script>
+    const scene = document.querySelector("a-scene");
+    const reticula = document.querySelector("#reticula");
+    const figura = document.querySelector("#figura");
+    const estado = document.querySelector("#estado");
+    const boton = document.querySelector("#colocar");
+
+    let session = null;
+    let hitSource = null;
+    let referenceSpace = null;
+    let hitPosition = null;
+
+    AFRAME.registerComponent("surface-hit-test", {
+      init() {
+        this.onSessionStart = async () => {
+          try {
+            session = scene.renderer.xr.getSession();
+
+            if (!session) {
+              throw new Error("No se encontró la sesión XR.");
+            }
+
+            referenceSpace = scene.renderer.xr.getReferenceSpace();
+
+            const viewerSpace =
+              await session.requestReferenceSpace("viewer");
+
+            hitSource = await session.requestHitTestSource({
+              space: viewerSpace
+            });
+
+            hitPosition = null;
+            reticula.object3D.visible = false;
+            figura.setAttribute("visible", false);
+            boton.style.display = "block";
+
+            estado.textContent =
+              "Mueve lentamente el celular hacia una mesa o el suelo.";
+
+            session.addEventListener("end", this.onSessionEnd, {
+              once: true
+            });
+          } catch (error) {
+            console.error(error);
+            estado.textContent =
+              "No se pudo activar hit-test: " + error.message;
+          }
+        };
+
+        this.onSessionEnd = () => {
+          session = null;
+          hitSource = null;
+          referenceSpace = null;
+          hitPosition = null;
+
+          reticula.object3D.visible = false;
+          figura.setAttribute("visible", false);
+          boton.style.display = "none";
+
+          estado.textContent = "Sesión de RA finalizada.";
+        };
+
+        scene.addEventListener("enter-vr", this.onSessionStart);
+      },
+
+      tick() {
+        if (!session || !hitSource || !referenceSpace) return;
+
+        const frame = scene.frame;
+        if (!frame || typeof frame.getHitTestResults !== "function") {
+          return;
+        }
+
+        const results = frame.getHitTestResults(hitSource);
+
+        if (results.length === 0) {
+          hitPosition = null;
+          reticula.object3D.visible = false;
+          estado.textContent =
+            "Buscando superficies... mueve el celular lentamente.";
+          return;
+        }
+
+        const pose = results[0].getPose(referenceSpace);
+        if (!pose) return;
+
+        const p = pose.transform.position;
+        hitPosition = { x: p.x, y: p.y, z: p.z };
+
+        reticula.object3D.position.set(p.x, p.y, p.z);
+        reticula.object3D.visible = true;
+
+        estado.textContent =
+          "Superficie detectada. Pulsa «Colocar figura».";
+      },
+
+      remove() {
+        scene.removeEventListener("enter-vr", this.onSessionStart);
+      }
+    });
+
+    boton.addEventListener("click", () => {
+      if (!hitPosition) {
+        estado.textContent =
+          "Todavía no se detecta una superficie. Mueve el celular.";
+        return;
+      }
+
+      figura.object3D.position.set(
+        hitPosition.x,
+        hitPosition.y,
+        hitPosition.z
+      );
+
+      figura.object3D.visible = true;
+      estado.textContent =
+        "Figura colocada en la superficie detectada.";
+    });
+
+    async function comprobarCompatibilidad() {
+      if (!navigator.xr) {
+        estado.textContent =
+          "WebXR no está disponible en este navegador.";
+        return;
+      }
+
+      try {
+        const supported =
+          await navigator.xr.isSessionSupported("immersive-ar");
+
+        if (!supported) {
+          estado.textContent =
+            "Este dispositivo no admite sesiones de RA inmersiva.";
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    comprobarCompatibilidad();
+  </script>
+</body>
+</html>
